@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+
 import os
 import subprocess
 import sys
@@ -9,14 +10,17 @@ import json
 import shutil
 from pathlib import Path
 from OpenSSL import crypto
+import secrets
+import signal
+import time
 
-# === Цвета ===
+# === Цвета для логов ===
 GREEN = "\033[32m"
 RED = "\033[31m"
 CYAN = "\033[36m"
 NC = "\033[0m"
 
-# === Константы ===
+# === Константы sing-box ===
 SINGBOX_VERSION = "1.11.15"
 SINGBOX_TAR = f"sing-box-{SINGBOX_VERSION}-linux-amd64.tar.gz"
 SINGBOX_URL = f"https://github.com/SagerNet/sing-box/releases/download/v{SINGBOX_VERSION}/{SINGBOX_TAR}"
@@ -29,33 +33,48 @@ KEY_PATH = CERT_DIR / "key.pem"
 SB_JSON_PATH = SB_DIR / "sb.json"
 
 # === Твои данные (ЗАДАЙ ТУТ!) ===
-HOST = "play.greathost.es"       # адрес сервера
-UUID = "123e4567-e89b-12d3-a456-426614174000"  # UUID пользователя
-PORT = 20361                      # порт
-SNI = "time.android.com"        # SNI-домен
+HOST = os.environ.get("SB_HOST", "node.waifly.com")       # адрес сервера
+UUID = os.environ.get("SB_UUID", "37d4e59a-1807-4d0e-99e5-7ec8d6c25797")  # идентификатор клиента
+PORT = int(os.environ.get("SB_PORT", "27558"))                      # порт
+SNI = os.environ.get("SB_SNI", "time.android.com")        # SNI-домен
 
-# === Утилиты логов ===
-def log(msg): print(f"{CYAN}[INFO]{NC} {msg}")
-def ok(msg):  print(f"{GREEN}[OK]{NC} {msg}")
-def err(msg): 
+# === Настройки маскировки/обфускации ===
+OBFS_PWD = os.environ.get("SB_OBFS_PWD") or secrets.token_urlsafe(24)
+MASS_PROXY_URL = os.environ.get("SB_MASS_PROXY", "https://www.gstatic.com")
+
+# === Простейшие функции логирования (минимум вывода) ===
+def info(msg):
+    print(f"{CYAN}[INFO]{NC} {msg}")
+
+def ok(msg):
+    print(f"{GREEN}[OK]{NC} {msg}")
+
+def warn(msg):
+    print(f"{RED}[WARN]{NC} {msg}", file=sys.stderr)
+
+def fatal(msg):
     print(f"{RED}[ERR]{NC} {msg}", file=sys.stderr)
     sys.exit(1)
 
 # === Проверка зависимостей ===
 def install_deps():
-    log("Проверка зависимостей...")
-
-    # Проверка pyOpenSSL
+    info("Проверка зависимостей")
     try:
-        import OpenSSL
+        import OpenSSL  # noqa: F401
     except ImportError:
-        log("Установка pyOpenSSL...")
-        subprocess.check_call([sys.executable, "-m", "pip", "install", "--user", "pyOpenSSL"])
-    ok("pyOpenSSL готов")
+        info("Устанавливаю pyOpenSSL...")
+        subprocess.check_call([sys.executable, "-m", "pip", "install", "--user", "pyOpenSSL"])  # noqa: S603
+    ok("Зависимости OK")
 
 # === Генерация сертификата ===
 def generate_cert():
-    log(f"Генерация сертификата для {SNI}")
+    external_cert = os.environ.get("EXTERNAL_CERT")
+    external_key = os.environ.get("EXTERNAL_KEY")
+    if external_cert and external_key and Path(external_cert).exists() and Path(external_key).exists():
+        info("Используются внешние сертификаты")
+        return str(external_cert), str(external_key)
+
+    info(f"Генерация самоподписного сертификата для {SNI}")
     CERT_DIR.mkdir(parents=True, exist_ok=True)
 
     key = crypto.PKey()
@@ -63,9 +82,9 @@ def generate_cert():
 
     cert = crypto.X509()
     cert.get_subject().CN = SNI
-    cert.set_serial_number(1)
+    cert.set_serial_number(secrets.randbits(64))
     cert.gmtime_adj_notBefore(0)
-    cert.gmtime_adj_notAfter(365*24*60*60)
+    cert.gmtime_adj_notAfter(365 * 24 * 60 * 60)
     cert.set_issuer(cert.get_subject())
     cert.set_pubkey(key)
     cert.sign(key, "sha256")
@@ -75,82 +94,155 @@ def generate_cert():
     with open(KEY_PATH, "wb") as f:
         f.write(crypto.dump_privatekey(crypto.FILETYPE_PEM, key))
 
-    ok("Сертификат создан")
+    ok("Сертификат создан (самоподписной)")
+    return str(CERT_PATH), str(KEY_PATH)
 
 # === Скачивание sing-box ===
 def download_singbox():
     sb_bin = SB_DIR / "sb"
     if sb_bin.exists() and os.access(sb_bin, os.X_OK):
-        log("sing-box уже скачан")
+        info("sing-box найден")
         return
 
-    log("Скачивание sing-box...")
+    info("Скачиваю sing-box...")
     SB_DIR.mkdir(parents=True, exist_ok=True)
     tmp_tar = Path(tempfile.gettempdir()) / SINGBOX_TAR
 
-    urllib.request.urlretrieve(SINGBOX_URL, tmp_tar)
+    try:
+        urllib.request.urlretrieve(SINGBOX_URL, tmp_tar)
+    except Exception as e:
+        fatal(f"Ошибка скачивания: {e}")
 
     with tarfile.open(tmp_tar, "r:gz") as tar:
         tar.extractall(path=tempfile.gettempdir())
 
     bin_path = Path(tempfile.gettempdir()) / f"sing-box-{SINGBOX_VERSION}-linux-amd64/sing-box"
-    shutil.move(str(bin_path), str(sb_bin))   # исправлено os.rename -> shutil.move
+    if not bin_path.exists():
+        fatal("Бинарник sing-box не найден в архиве")
+
+    shutil.move(str(bin_path), str(sb_bin))
     os.chmod(sb_bin, 0o755)
-    tmp_tar.unlink()
+    try:
+        tmp_tar.unlink()
+    except Exception:
+        pass
     ok("sing-box установлен")
 
-# === Генерация конфигурации ===
-def generate_config():
-    log("Создание конфигурации sb.json")
+# === Генерация конфига ===
+def generate_config(cert_path: str, key_path: str):
+    info("Создаю конфиг sb.json")
+
+    auth_password = UUID
+
     config = {
+        "log": {"level": "warn", "timestamp": True},
         "inbounds": [
             {
                 "type": "hysteria2",
+                "tag": "hy2-in",
                 "listen": "::",
                 "listen_port": PORT,
-                "users": [{"password": UUID}],
+                "users": [{"name": "client1", "password": auth_password}],
                 "tls": {
                     "enabled": True,
                     "server_name": SNI,
-                    "key_path": str(KEY_PATH),
-                    "certificate_path": str(CERT_PATH)
+                    "min_version": "1.3",
+                    "alpn": ["h3", "http/1.1"],
+                    "key_path": str(key_path),
+                    "certificate_path": str(cert_path),
                 },
-                "masquerade": f"https://{SNI}"
+                "obfs": {"type": "salamander", "password": OBFS_PWD},
+                "masquerade": {"type": "proxy", "url": MASS_PROXY_URL, "rewrite_host": True},
+                "ignore_client_bandwidth": True,
+                "brutal_debug": False,
             }
         ],
-        "outbounds": [
-            {"tag": "direct", "type": "direct"},
-            {"tag": "block", "type": "block"}
-        ]
+        "outbounds": [{"tag": "direct", "type": "direct"}, {"tag": "block", "type": "block"}],
     }
-    SB_JSON_PATH.write_text(json.dumps(config, indent=2))
-    ok("Конфиг создан")
 
-# === Генерация ссылки ===
+    SB_DIR.mkdir(parents=True, exist_ok=True)
+    SB_JSON_PATH.write_text(json.dumps(config, indent=2, ensure_ascii=False))
+    ok(f"Конфиг записан: {SB_JSON_PATH}")
+
+# === Генерация ссылки для клиента (коротко) ===
 def generate_url():
-    log("Генерация hysteria2-ссылки")
+    info("Генерирую ссылку для клиента")
     try:
-        org = subprocess.check_output(
-            ["curl", "-s", "ipinfo.io/org"], text=True
-        ).strip()
+        org = subprocess.check_output(["curl", "-s", "ipinfo.io/org"], text=True).strip()
         org = org.split(" ", 1)[1] if " " in org else "hy2"
         org = org.replace(" ", "-").lower()
     except Exception:
         org = "hy2"
 
-    url = f"hysteria2://{UUID}@{HOST}:{PORT}/?sni={SNI}&insecure=1#{org}"
-    print(f"\n{GREEN}{url}{NC}\n")
+    from urllib.parse import quote_plus
+    obfs_pwd_enc = quote_plus(OBFS_PWD)
 
-# === Запуск sing-box ===
-def run_singbox():
-    log("Запуск sing-box...")
-    os.execv(str(SB_DIR / "sb"), [str(SB_DIR / "sb"), "run", "-c", str(SB_JSON_PATH)])
+    insecure_flag = "0" if os.environ.get("EXTERNAL_CERT") and os.environ.get("EXTERNAL_KEY") else "1"
 
-# === Выполнение ===
+    url = (
+        f"hysteria2://{UUID}@{HOST}:{PORT}/"
+        f"?sni={SNI}&obfs=salamander&obfs-password={obfs_pwd_enc}&insecure={insecure_flag}#{org}"
+    )
+
+    print("")
+    ok("Ссылка для клиента готова")
+    print(url)
+    print("")
+
+# === Запуск sing-box (минимальный вывод, фоновый процесс) ===
+child_proc = None
+
+def start_singbox():
+    global child_proc
+    info("Запуск sing-box")
+    sb_path = SB_DIR / "sb"
+    if not sb_path.exists():
+        fatal("sing-box не найден. Запустите скачивание")
+
+    # Запускаем sing-box в фоновом режиме, скрывая его подробный вывод (чтобы в консоли был только наш лаконичный лог)
+    try:
+        child_proc = subprocess.Popen([str(sb_path), "run", "-c", str(SB_JSON_PATH)], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    except Exception as e:
+        fatal(f"Не удалось запустить sing-box: {e}")
+
+    ok(f"sing-box запущен и работает (PID={child_proc.pid})")
+    print(f"{GREEN}sing-box работает{NC}")
+
+    # Обрабатываем корректную остановку: ждём завершения и сообщаем о коде
+    try:
+        rc = child_proc.wait()
+        if rc == 0:
+            ok("sing-box завершил работу нормально")
+        else:
+            warn(f"sing-box завершился с кодом {rc}")
+    except KeyboardInterrupt:
+        info("Останавливаю sing-box по сигналу")
+        terminate_child()
+
+def terminate_child():
+    global child_proc
+    if child_proc and child_proc.poll() is None:
+        try:
+            child_proc.terminate()
+            time.sleep(1)
+            if child_proc.poll() is None:
+                child_proc.kill()
+        except Exception:
+            pass
+
+def _signal_handler(signum, frame):
+    info(f"Получен сигнал {signum}, завершаю...")
+    terminate_child()
+    sys.exit(0)
+
+signal.signal(signal.SIGINT, _signal_handler)
+signal.signal(signal.SIGTERM, _signal_handler)
+
+# === main ===
 if __name__ == "__main__":
     install_deps()
-    generate_cert()
+    cert_p, key_p = generate_cert()
     download_singbox()
-    generate_config()
+    generate_config(cert_p, key_p)
     generate_url()
-    run_singbox()
+    start_singbox()
