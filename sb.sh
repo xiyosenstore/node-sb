@@ -9,7 +9,7 @@ NC="\e[0m"
 
 # === Константы ===
 SINGBOX_VERSION="1.11.15"
-SINGBOX_TAR="sing-box-${SINGBOX_VERSION}-linux-amd64.tar.gz"
+SINGBOX_TAR="sing-box-${SINGBOX_VERSION}-linux-386.tar.gz"
 SINGBOX_URL="https://github.com/SagerNet/sing-box/releases/download/v${SINGBOX_VERSION}/${SINGBOX_TAR}"
 
 HOME_DIR="${HOME:-/home/container}"
