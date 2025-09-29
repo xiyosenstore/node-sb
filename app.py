@@ -22,7 +22,7 @@ NC = "\033[0m"
 
 # === Константы sing-box ===
 SINGBOX_VERSION = "1.11.15"
-SINGBOX_TAR = f"sing-box-{SINGBOX_VERSION}-linux-amd64.tar.gz"
+SINGBOX_TAR = f"sing-box-{SINGBOX_VERSION}-linux-arm64.tar.gz"
 SINGBOX_URL = f"https://github.com/SagerNet/sing-box/releases/download/v{SINGBOX_VERSION}/{SINGBOX_TAR}"
 
 HOME_DIR = os.environ.get("HOME", "/home/container")
@@ -33,7 +33,7 @@ KEY_PATH = CERT_DIR / "key.pem"
 SB_JSON_PATH = SB_DIR / "sb.json"
 
 # === Твои данные (ЗАДАЙ ТУТ!) ===
-HOST = os.environ.get("SB_HOST", "node.waifly.com")       # адрес сервера
+HOST = os.environ.get("SB_HOST", "nue.domcloud.co")       # адрес сервера
 UUID = os.environ.get("SB_UUID", "37d4e59a-1807-4d0e-99e5-7ec8d6c25797")  # идентификатор клиента
 PORT = int(os.environ.get("SB_PORT", "27558"))                      # порт
 SNI = os.environ.get("SB_SNI", "time.android.com")        # SNI-домен
