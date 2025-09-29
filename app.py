@@ -21,7 +21,7 @@ NC = "\033[0m"
 
 # === Константы sing-box ===
 SINGBOX_VERSION = "1.11.15"
-SINGBOX_TAR = f"sing-box-{SINGBOX_VERSION}-linux-amd64.tar.gz"
+SINGBOX_TAR = f"sing-box-{SINGBOX_VERSION}-linux-arm64.tar.gz"
 SINGBOX_URL = f"https://github.com/SagerNet/sing-box/releases/download/v{SINGBOX_VERSION}/{SINGBOX_TAR}"
 
 HOME_DIR = os.environ.get("HOME", "/home/container")
