@@ -4,7 +4,6 @@ import os
 import subprocess
 import sys
 import tarfile
-import tempfile
 import urllib.request
 import json
 import shutil
@@ -106,7 +105,9 @@ def download_singbox():
 
     info("Скачиваю sing-box...")
     SB_DIR.mkdir(parents=True, exist_ok=True)
-    tmp_tar = Path(tempfile.gettempdir()) / SINGBOX_TAR
+
+    # Скачиваем в текущую директорию вместо /tmp
+    tmp_tar = Path.cwd() / SINGBOX_TAR
 
     try:
         urllib.request.urlretrieve(SINGBOX_URL, tmp_tar)
@@ -114,9 +115,9 @@ def download_singbox():
         fatal(f"Ошибка скачивания: {e}")
 
     with tarfile.open(tmp_tar, "r:gz") as tar:
-        tar.extractall(path=tempfile.gettempdir())
+        tar.extractall(path=Path.cwd())
 
-    bin_path = Path(tempfile.gettempdir()) / f"sing-box-{SINGBOX_VERSION}-linux-amd64/sing-box"
+    bin_path = Path.cwd() / f"sing-box-{SINGBOX_VERSION}-linux-arm64/sing-box"
     if not bin_path.exists():
         fatal("Бинарник sing-box не найден в архиве")
 
@@ -199,7 +200,6 @@ def start_singbox():
     if not sb_path.exists():
         fatal("sing-box не найден. Запустите скачивание")
 
-    # Запускаем sing-box в фоновом режиме, скрывая его подробный вывод (чтобы в консоли был только наш лаконичный лог)
     try:
         child_proc = subprocess.Popen([str(sb_path), "run", "-c", str(SB_JSON_PATH)], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     except Exception as e:
@@ -208,7 +208,6 @@ def start_singbox():
     ok(f"sing-box запущен и работает (PID={child_proc.pid})")
     print(f"{GREEN}sing-box работает{NC}")
 
-    # Обрабатываем корректную остановку: ждём завершения и сообщаем о коде
     try:
         rc = child_proc.wait()
         if rc == 0:
