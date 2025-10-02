@@ -34,9 +34,10 @@ SB_BIN = SB_DIR / "sb"
 
 HOST = os.environ.get("SB_HOST", "node1.lunes.host")
 UUID = os.environ.get("SB_UUID", "37d4e59a-1807-4d0e-99e5-7ec8d6c25797")
-PORT = int(os.environ.get("SB_PORT", "2010"))
-TROJAN_PORT = int(os.environ.get("SB_TROJAN_PORT", str(PORT + 1)))
-SNI = os.environ.get("SB_SNI", "time.android.com")
+# Default ports optimized for Cloudflare proxy:
+PORT = int(os.environ.get("SB_PORT", "443"))               # VLESS default -> 443
+TROJAN_PORT = int(os.environ.get("SB_TROJAN_PORT", "8443"))  # Trojan default -> 8443
+SNI = os.environ.get("SB_SNI", HOST)
 
 WS_PATH = os.environ.get("SB_WS_PATH", "/ws")
 # Trojan needs a password/secret; default to OBFS_PWD (random) but override with SB_TROJAN_PWD env var if provided
@@ -223,8 +224,9 @@ def generate_client_urls():
     print(trojan_url)
     print()
     print("Catatan:")
-    print("- Jika client-mu mengharuskan opsi lain (contoh: header khusus, atau ws host berbeda), atur env SB_WS_PATH atau SB_HOST.")
-    print("- Jika saat menjalankan sing-box muncul error terkait schema (field 'users'/'passwords' dll), beri tahu log errornya dan aku bantu sesuaikan.")
+    print("- Default ports sudah diubah: VLESS=443, Trojan=8443 (cocok untuk Cloudflare proxy).")
+    print("- Jika kamu menggunakan Cloudflare, pastikan domain di-proxy (orange cloud) dan SB_HOST/SB_SNI di-set ke domain itu.")
+    print("- Jika pakai sertifikat Let's Encrypt / Cloudflare Origin CA, set EXTERNAL_CERT & EXTERNAL_KEY untuk sertifikat resmi.")
     print()
 
 # ----------------- Запуск sing-box и обработка сигналов -----------------
