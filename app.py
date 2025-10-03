@@ -32,18 +32,12 @@ KEY_PATH = CERT_DIR / "key.pem"
 SB_JSON = SB_DIR / "sb.json"
 SB_BIN = SB_DIR / "sb"
 
-HOST = os.environ.get("SB_HOST", "node.waifly.com")
-UUID = os.environ.get("SB_UUID", "d45cdd57-9ec0-4f51-9174-0cb7c554ce03")
-# Default ports optimized for Cloudflare proxy:
-PORT = int(os.environ.get("SB_PORT", "443"))               # VLESS default -> 443
-TROJAN_PORT = int(os.environ.get("SB_TROJAN_PORT", "8443"))  # Trojan default -> 8443
-SNI = os.environ.get("SB_SNI", HOST)
+HOST = os.environ.get("SB_HOST", "node1.lunes.host")
+UUID = os.environ.get("SB_UUID", "37d4e59a-1807-4d0e-99e5-7ec8d6c25797")
+PORT = int(os.environ.get("SB_PORT", "2010"))
+SNI = os.environ.get("SB_SNI", "time.android.com")
 
-WS_PATH = os.environ.get("SB_WS_PATH", "/ws")
-# Trojan needs a password/secret; default to OBFS_PWD (random) but override with SB_TROJAN_PWD env var if provided
-DEFAULT_TROJAN_PWD = os.environ.get("SB_TROJAN_PWD")
-OBFS_PWD = DEFAULT_TROJAN_PWD or os.environ.get("SB_OBFS_PWD") or secrets.token_urlsafe(24)
-
+OBFS_PWD = os.environ.get("SB_OBFS_PWD") or secrets.token_urlsafe(24)
 MASS_PROXY = os.environ.get("SB_MASS_PROXY", "https://www.gstatic.com")
 
 # ----------------- Логирование -----------------
@@ -128,105 +122,54 @@ def download_and_extract_singbox(url: str, target: Path):
         fatal("После распаковки sing-box не найден или не исполняем.")
     ok("sing-box установлен")
 
-# ----------------- Конфиг (VLESS+WS и Trojan+WS) -----------------
+# ----------------- Конфиг -----------------
 def write_config(cert_path: str, key_path: str):
-    info("Формирую sb.json (VLESS+WS и Trojan+WS)")
-
-    # Inbound VLESS over WebSocket (listens on PORT)
-    vless_inbound = {
-        "type": "vless",
-        "tag": "vless-ws-in",
-        "listen": "::",
-        "listen_port": PORT,
-        "users": [
-            {
-                "id": UUID
-            }
-        ],
-        "tls": {
-            "enabled": True,
-            "server_name": SNI,
-            "min_version": "1.3",
-            "alpn": ["http/1.1"],
-            "key_path": str(key_path),
-            "certificate_path": str(cert_path)
-        },
-        "transport": {
-            "type": "ws",
-            "path": WS_PATH,
-            "headers": {"Host": HOST}
-        },
-        "ignore_client_bandwidth": True
-    }
-
-    # Inbound Trojan over WebSocket (listens on TROJAN_PORT)
-    # Note: field names for trojan users may vary across implementations. This covers common forms.
-    trojan_inbound = {
-        "type": "trojan",
-        "tag": "trojan-ws-in",
-        "listen": "::",
-        "listen_port": TROJAN_PORT,
-        # sing-box trojan user formats vary; include both 'passwords' and 'users' forms to increase compatibility
-        "passwords": [OBFS_PWD],
-        "users": [
-            {
-                "password": OBFS_PWD
-            }
-        ],
-        "tls": {
-            "enabled": True,
-            "server_name": SNI,
-            "min_version": "1.3",
-            "alpn": ["http/1.1"],
-            "key_path": str(key_path),
-            "certificate_path": str(cert_path)
-        },
-        "transport": {
-            "type": "ws",
-            "path": WS_PATH,
-            "headers": {"Host": HOST}
-        },
-        "ignore_client_bandwidth": True
-    }
-
+    info("Формирую sb.json")
     cfg = {
         "log": {"level": "warn", "timestamp": True},
-        "inbounds": [vless_inbound, trojan_inbound],
-        "outbounds": [{"tag": "direct", "type": "direct"}, {"tag": "block", "type": "block"}]
+        "inbounds": [{
+            "type": "hysteria2",
+            "tag": "hy2-in",
+            "listen": "::",
+            "listen_port": PORT,
+            "users": [{"name": "client1", "password": UUID}],
+            "tls": {
+                "enabled": True,
+                "server_name": SNI,
+                "min_version": "1.3",
+                "alpn": ["h3", "http/1.1"],
+                "key_path": str(key_path),
+                "certificate_path": str(cert_path),
+            },
+            "obfs": {"type": "salamander", "password": OBFS_PWD},
+            "masquerade": {"type": "proxy", "url": MASS_PROXY, "rewrite_host": True},
+            "ignore_client_bandwidth": True,
+            "brutal_debug": False,
+        }],
+        "outbounds": [{"tag": "direct", "type": "direct"}, {"tag": "block", "type": "block"}],
     }
-
     SB_DIR.mkdir(parents=True, exist_ok=True)
     SB_JSON.write_text(json.dumps(cfg, indent=2, ensure_ascii=False))
     ok(f"Конфиг записан: {SB_JSON}")
 
 # ----------------- Генерация client URL -----------------
-def generate_client_urls():
-    info("Генерирую ссылки для клиента (VLESS dan Trojan)")
+def generate_client_url():
+    info("Генерирую ссылку для клиента")
+    org = "hy2"
+    try:
+        out = subprocess.check_output(["curl", "-s", "ipinfo.io/org"], text=True).strip()
+        if out:
+            org = out.split(" ", 1)[1].replace(" ", "-").lower() if " " in out else out.replace(" ", "-").lower()
+    except Exception:
+        pass
 
     from urllib.parse import quote_plus
+    obfs_pwd_enc = quote_plus(OBFS_PWD)
     insecure = "0" if (os.environ.get("EXTERNAL_CERT") and os.environ.get("EXTERNAL_KEY")) else "1"
-
-    # VLESS ws URL (common)
-    vless_params = f"security=tls&type=ws&host={quote_plus(HOST)}&path={quote_plus(WS_PATH)}&sni={quote_plus(SNI)}"
-    vless_url = f"vless://{UUID}@{HOST}:{PORT}?{vless_params}#{HOST}-vless"
-
-    # Trojan ws URL (common form)
-    # Example: trojan://password@host:port?type=ws&security=tls&path=%2Fws&sni=...#tag
-    trojan_params = f"type=ws&security=tls&host={quote_plus(HOST)}&path={quote_plus(WS_PATH)}&sni={quote_plus(SNI)}"
-    trojan_url = f"trojan://{quote_plus(OBFS_PWD)}@{HOST}:{TROJAN_PORT}?{trojan_params}#{HOST}-trojan"
-
-    ok("Ссылки готовы")
+    url = f"hysteria2://{UUID}@{HOST}:{PORT}/?sni={SNI}&obfs=salamander&obfs-password={obfs_pwd_enc}&insecure={insecure}#{org}"
+    ok("Ссылка готова")
     print()
-    print("=== VLESS (WebSocket + TLS) ===")
-    print(vless_url)
-    print()
-    print("=== Trojan (WebSocket + TLS) ===")
-    print(trojan_url)
-    print()
-    print("Catatan:")
-    print("- Default ports sudah diubah: VLESS=443, Trojan=8443 (cocok untuk Cloudflare proxy).")
-    print("- Jika kamu menggunakan Cloudflare, pastikan domain di-proxy (orange cloud) dan SB_HOST/SB_SNI di-set ke domain itu.")
-    print("- Jika pakai sertifikat Let's Encrypt / Cloudflare Origin CA, set EXTERNAL_CERT & EXTERNAL_KEY untuk sertifikat resmi.")
+    print(url)
     print()
 
 # ----------------- Запуск sing-box и обработка сигналов -----------------
@@ -270,7 +213,7 @@ def main():
     cert, key = get_cert_paths()
     download_and_extract_singbox(SINGBOX_URL, SB_BIN)
     write_config(cert, key)
-    generate_client_urls()
+    generate_client_url()
     start_singbox()
 
 if __name__ == "__main__":
