@@ -32,8 +32,8 @@ KEY_PATH = CERT_DIR / "key.pem"
 SB_JSON = SB_DIR / "sb.json"
 SB_BIN = SB_DIR / "sb"
 
-HOST = os.environ.get("SB_HOST", "node1.lunes.host")
-UUID = os.environ.get("SB_UUID", "37d4e59a-1807-4d0e-99e5-7ec8d6c25797")
+HOST = os.environ.get("SB_HOST", "node.waifly.com")
+UUID = os.environ.get("SB_UUID", "d45cdd57-9ec0-4f51-9174-0cb7c554ce03")
 # Default ports optimized for Cloudflare proxy:
 PORT = int(os.environ.get("SB_PORT", "443"))               # VLESS default -> 443
 TROJAN_PORT = int(os.environ.get("SB_TROJAN_PORT", "8443"))  # Trojan default -> 8443
